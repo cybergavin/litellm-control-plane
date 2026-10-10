@@ -1,0 +1,28 @@
+---
+# Supported LiteLLM model modes: chat, completion, embedding, image_generation,
+# moderation, audio_transcription, audio_speech, rerank.
+#
+# Use `credential_name` to reference a non-secret credential alias already
+# configured in your LiteLLM config.yaml (e.g. for Azure AI or Vertex AI).
+# Never store API keys or secrets here.
+models:
+  openai-gpt-4o:
+    model_name: "openai/gpt-4o"
+    custom_llm_provider: "openai"
+    base_model: "gpt-4o"
+    credential_name: "openai_credential"
+    mode: "chat"
+
+  openai-gpt-4o-mini:
+    model_name: "openai/gpt-4o-mini"
+    custom_llm_provider: "openai"
+    base_model: "gpt-4o-mini"
+    credential_name: "openai_credential"
+    mode: "chat"
+
+  openai-text-embedding-3-small:
+    model_name: "openai/text-embedding-3-small"
+    custom_llm_provider: "openai"
+    base_model: "text-embedding-3-small"
+    credential_name: "openai_credential"
+    mode: "embedding"

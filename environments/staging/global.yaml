@@ -1,0 +1,6 @@
+---
+# Staging is a non-production environment. Users get internal_user role and
+# all-proxy-models access by default. No budget enforcement, tags, or
+# read-only permission restrictions are applied here.
+prod_environment: "prod"
+user_email_domain: "example.com"

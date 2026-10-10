@@ -1,0 +1,97 @@
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+required:
+  - teams
+properties:
+  teams:
+    type: object
+    description: LiteLLM teams keyed by a stable workload identifier.
+    propertyNames:
+      pattern: "^[a-z0-9][a-z0-9-]*$"
+    additionalProperties:
+      type: object
+      required:
+        - team_alias
+        - organization
+        - models
+      properties:
+        team_alias:
+          type: string
+          minLength: 1
+          description: User-facing LiteLLM team display name; the YAML map key is the stable identifier.
+        organization:
+          type: string
+          description: Stable key from organizations.yaml.
+          pattern: "^[a-z0-9][a-z0-9_-]*$"
+        models:
+          type: array
+          description: LiteLLM model names or built-in access aliases, not models.yaml map keys.
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+        max_budget:
+          type: number
+          minimum: 0
+          description: Maximum team spend in USD for the configured budget cycle.
+        soft_budget:
+          type: number
+          exclusiveMinimum: 0
+          description: Optional warning threshold in USD; defaults to 75% of max_budget.
+        soft_budget_alerting_emails:
+          type: array
+          description: >-
+            Optional replacement for the default email addresses derived from
+            human team members via user_email_domain. An empty list disables
+            email recipients for the team.
+          uniqueItems: true
+          items:
+            type: string
+            format: email
+        tags:
+          type: array
+          description: >-
+            Optional workload tags added to the generated team, organization, and
+            environment tags. Those three prefixes are reserved.
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+        budget_duration:
+          type: string
+          const: "1mo"
+          description: Monthly reset interval for max_budget.
+        team_member_permissions:
+          type: array
+          description: >-
+            Optional override for the read-only LiteLLM routes granted to
+            production human team members. When omitted, OpenTofu grants the
+            four listed routes by default. An explicit list may select a
+            stricter subset; key-management and other routes are forbidden.
+          default:
+            - /team/daily/activity
+            - /team/daily/activity/aggregated
+            - /spend/logs
+            - /spend/logs/v2
+          maxItems: 4
+          uniqueItems: true
+          items:
+            type: string
+            enum:
+              - /team/daily/activity
+              - /team/daily/activity/aggregated
+              - /spend/logs
+              - /spend/logs/v2
+      dependentRequired:
+        max_budget:
+          - budget_duration
+        budget_duration:
+          - max_budget
+        soft_budget:
+          - max_budget
+        soft_budget_alerting_emails:
+          - max_budget
+      additionalProperties: false
+additionalProperties: false

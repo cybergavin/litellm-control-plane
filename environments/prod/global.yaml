@@ -1,0 +1,9 @@
+---
+# The name of this environment when treated as "production".
+# Sets prod_environment to match the directory name for this environment.
+prod_environment: "prod"
+
+# Email domain used to derive user_email and soft-budget alert addresses from
+# the YAML map key (e.g. "jsmith" -> "jsmith@example.com"). Remove this field
+# to disable automatic email derivation.
+user_email_domain: "example.com"

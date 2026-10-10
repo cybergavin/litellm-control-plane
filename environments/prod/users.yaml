@@ -1,0 +1,10 @@
+# Human users are not managed by this control plane.
+#
+# Users are provisioned automatically by your Identity Provider via:
+#   - SSO JIT provisioning (all LiteLLM tiers)
+#   - SCIM sync (LiteLLM Enterprise)
+#
+# See docs/USER_PROVISIONING.md.
+#
+# This file is intentionally empty. Delete it if your environment loader
+# does not require it to be present.

@@ -1,0 +1,108 @@
+---
+name: LiteLLM - Post-Promotion Validation
+
+# checkov:skip=CKV_GHA_7: the only manual input is a validated environment choice; validation uses GET requests only.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "LiteLLM environment to validate (e.g. staging, prod)"
+        required: true
+        type: string
+      deployment_ref:
+        description: "Full immutable commit SHA to validate"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "LiteLLM environment to validate"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: litellm-validation-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Validate promoted ${{ inputs.environment }} gateway
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      DEPLOYMENT_REF: ${{ inputs.deployment_ref || github.sha }}
+      DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+      LITELLM_API_BASE: ${{ vars.LITELLM_API_BASE }}
+      LITELLM_API_KEY_SECRET_ID: ${{ vars.LITELLM_API_KEY_SECRET_ID }}
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # actions/checkout@v7.0.0
+        with:
+          ref: ${{ env.DEPLOYMENT_REF }}
+
+      - name: Verify immutable candidate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$DEPLOYMENT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::deployment_ref must be a full lowercase 40-character commit SHA."
+            exit 1
+          fi
+          resolved_ref="$(git rev-parse HEAD)"
+          if [[ "$resolved_ref" != "$DEPLOYMENT_REF" ]]; then
+            echo "::error::Checkout did not resolve to the requested immutable candidate."
+            exit 1
+          fi
+
+      - name: Validate workflow configuration
+        shell: bash
+        env:
+          AWS_ROLE_TFPLAN: ${{ vars.AWS_ROLE_TFPLAN }}
+        run: |
+          set -euo pipefail
+
+          for required_name in \
+            AWS_ROLE_TFPLAN \
+            LITELLM_API_BASE \
+            LITELLM_API_KEY_SECRET_ID; do
+            if [[ -z "${!required_name:-}" ]]; then
+              echo "::error::Required GitHub variable ${required_name} is not configured."
+              exit 1
+            fi
+          done
+
+          command -v python3 > /dev/null 2>&1 || {
+            echo "::error::The runner must provide Python 3."
+            exit 1
+          }
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: ${{ vars.AWS_DEFAULT_REGION || 'us-east-1' }}
+          role-to-assume: ${{ vars.AWS_ROLE_TFPLAN }}
+          role-session-name: litellm-post-promotion-validation-${{ inputs.environment }}
+
+      - name: Load LiteLLM API key
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # aws-secretsmanager-get-secrets@v3.0-2
+        with:
+          secret-ids: |
+            LITELLM_API_KEY,${{ vars.LITELLM_API_KEY_SECRET_ID }}
+          parse-json-secrets: false
+
+      - name: Validate ${{ inputs.environment }} gateway
+        shell: bash
+        run: python3 scripts/validate_litellm.py
+
+      - name: Record validated commit
+        shell: bash
+        run: |
+          printf 'Validated immutable %s candidate: `%s`\n' "$DEPLOYMENT_ENVIRONMENT" "$DEPLOYMENT_REF" >> "$GITHUB_STEP_SUMMARY"

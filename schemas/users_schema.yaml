@@ -1,0 +1,59 @@
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+required:
+  - users
+properties:
+  users:
+    type: object
+    description: >-
+      Human LiteLLM users keyed by a stable, non-sensitive identifier.
+      Non-production users may experiment freely; production users are
+      dashboard-only observers.
+    propertyNames:
+      pattern: "^[a-z0-9][a-z0-9_-]*$"
+    additionalProperties:
+      type: object
+      properties:
+        user_email:
+          type: string
+          description: >-
+            Optional LiteLLM identity override. When omitted and
+            user_email_domain is set in global.yaml, the email defaults to
+            <map-key>@<user_email_domain>.
+          format: email
+        user_alias:
+          type: string
+          minLength: 1
+        user_role:
+          type: string
+          description: >-
+            Defaults to internal_user in non-production and
+            internal_user_viewer in production.
+          enum:
+            - proxy_admin
+            - proxy_admin_viewer
+            - internal_user
+            - internal_user_viewer
+        models:
+          description: >-
+            Defaults to all-proxy-models in non-production. Production human
+            entries must omit models; only team-bound service-account keys
+            perform inference there.
+          oneOf:
+            - type: array
+              const:
+                - all-proxy-models
+            - type: array
+              minItems: 1
+              uniqueItems: true
+              items:
+                type: string
+                minLength: 1
+                not:
+                  enum:
+                    - all-proxy-models
+                    - all-team-models
+                    - no-default-models
+      additionalProperties: false
+additionalProperties: false

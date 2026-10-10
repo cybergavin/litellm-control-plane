@@ -1,0 +1,30 @@
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+required: []
+properties:
+  prod_environment:
+    type: string
+    description: >-
+      Name of the environment treated as production. Activates budget enforcement,
+      team tags, and read-only permissions for human users. Defaults to "prod".
+    minLength: 1
+  user_email_domain:
+    type: string
+    description: >-
+      Domain appended to the YAML map key when deriving user_email and
+      soft-budget alert recipients (e.g. "example.com"). Omit to disable
+      automatic email derivation.
+    pattern: "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
+  preserved_model_imports:
+    type: object
+    description: >-
+      Ephemeral import map for UI-created models whose API configuration the
+      pinned provider cannot represent. Add the stable model key and LiteLLM
+      ID here, run an import-only plan, apply it, then remove the entry.
+    propertyNames:
+      pattern: "^[a-z0-9][a-z0-9-]*$"
+    additionalProperties:
+      type: string
+      minLength: 1
+additionalProperties: false

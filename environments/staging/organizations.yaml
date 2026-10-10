@@ -1,0 +1,4 @@
+---
+# Organizations are a production governance boundary; staging remains
+# user-focused so organizations can be left empty or minimal.
+organizations: {}

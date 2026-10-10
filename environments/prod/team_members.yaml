@@ -1,0 +1,11 @@
+---
+# Associates service-account workload identities with their owning teams.
+#
+# Human users are NOT listed here. They are added to teams automatically
+# by your Identity Provider via SSO group-to-team mapping or SCIM sync.
+# See docs/USER_PROVISIONING.md for the recommended approach.
+team_members:
+  engineering-platform:
+    - principal: "svc-platform-app"
+  data-science-research:
+    - principal: "svc-research-pipeline"

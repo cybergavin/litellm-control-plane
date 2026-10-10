@@ -1,0 +1,270 @@
+---
+name: LiteLLM Control Plane - Apply
+
+# checkov:skip=CKV_GHA_7: refs are full SHAs, must match the event SHA, and are verified again after checkout.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "LiteLLM environment to apply (e.g. staging, prod)"
+        required: true
+        type: string
+      deployment_ref:
+        description: "Full immutable candidate SHA to apply"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "LiteLLM environment to apply"
+        required: true
+        type: string
+      reviewed_sha:
+        description: "Full commit SHA from the successful control-plane plan"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+  DEPLOYMENT_REF: ${{ inputs.deployment_ref || inputs.reviewed_sha }}
+
+concurrency:
+  group: litellm-control-plane-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  verify-candidate:
+    name: Verify immutable candidate
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Validate immutable commit
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$DEPLOYMENT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::The deployment ref must be a full lowercase 40-character commit SHA."
+            exit 1
+          fi
+          if [[ "$DEPLOYMENT_REF" != "$GITHUB_SHA" ]]; then
+            echo "::error::The deployment ref does not match the event commit $GITHUB_SHA."
+            exit 1
+          fi
+
+  approve:
+    name: Approve ${{ inputs.environment }} control-plane apply
+    needs: verify-candidate
+    runs-on: ubuntu-latest
+    # This step halts for a human approval gate configured in GitHub Environments.
+    # Create an environment named "<env>-approval" in your repository settings
+    # and add the required reviewers.
+    environment: ${{ format('{0}-approval', inputs.environment) }}
+    timeout-minutes: 60
+    steps:
+      - name: Record approval
+        run: printf 'Approved %s control-plane commit `%s`.\n' "$DEPLOYMENT_ENVIRONMENT" "$DEPLOYMENT_REF"
+
+  apply:
+    name: Apply ${{ inputs.environment }} LiteLLM control plane
+    needs: approve
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: "."
+    env:
+      LITELLM_API_BASE: ${{ vars.LITELLM_API_BASE }}
+      LITELLM_API_KEY_SECRET_ID: ${{ vars.LITELLM_API_KEY_SECRET_ID }}
+      AWS_CLI_VERSION: "2.27.41"
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_VAR_environment: ${{ inputs.environment }}
+      TF_PLAN_FILE: .litellm-control-plane-${{ inputs.environment }}.tfplan
+      TF_PLAN_TEXT: .litellm-control-plane-${{ inputs.environment }}-plan.txt
+    steps:
+      - name: Checkout immutable candidate
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # actions/checkout@v7.0.0
+        with:
+          ref: ${{ env.DEPLOYMENT_REF }}
+
+      - name: Verify immutable checkout
+        run: |
+          set -euo pipefail
+
+          resolved_ref="$(git rev-parse HEAD)"
+          if [[ "$resolved_ref" != "$DEPLOYMENT_REF" ]]; then
+            echo "::error::Checkout resolved to $resolved_ref instead of $DEPLOYMENT_REF."
+            exit 1
+          fi
+
+      - name: Validate workflow configuration
+        env:
+          AWS_ROLE_TFAPPLY: ${{ vars.AWS_ROLE_TFAPPLY }}
+        run: |
+          set -euo pipefail
+
+          for required_name in \
+            AWS_ROLE_TFAPPLY \
+            LITELLM_API_BASE \
+            LITELLM_API_KEY_SECRET_ID; do
+            if [[ -z "${!required_name:-}" ]]; then
+              echo "::error::Required GitHub variable ${required_name} is not configured."
+              exit 1
+            fi
+          done
+
+          for command_name in curl python3; do
+            command -v "$command_name" > /dev/null 2>&1 || {
+              echo "::error::The runner must provide ${command_name}."
+              exit 1
+            }
+          done
+
+      - name: Ensure AWS CLI
+        run: |
+          set -euo pipefail
+
+          if command -v aws > /dev/null 2>&1; then
+            aws --version
+            exit 0
+          fi
+
+          case "$(uname -m)" in
+            x86_64)
+              aws_cli_arch="x86_64"
+              ;;
+            aarch64|arm64)
+              aws_cli_arch="aarch64"
+              ;;
+            *)
+              echo "::error::Unsupported runner architecture: $(uname -m)."
+              exit 1
+              ;;
+          esac
+
+          aws_cli_temp="$(mktemp -d "$RUNNER_TEMP/aws-cli.XXXXXX")"
+          aws_cli_archive="$aws_cli_temp/awscliv2.zip"
+          aws_cli_install="$aws_cli_temp/install"
+          aws_cli_bin="$aws_cli_temp/bin"
+          mkdir -p "$aws_cli_bin"
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            --output "$aws_cli_archive" \
+            "https://awscli.amazonaws.com/awscli-exe-linux-${aws_cli_arch}-${AWS_CLI_VERSION}.zip"
+          python3 - "$aws_cli_archive" "$aws_cli_temp" <<'PY'
+          import os
+          import sys
+          import zipfile
+          from pathlib import Path
+
+          archive, destination = sys.argv[1:]
+          with zipfile.ZipFile(archive) as aws_cli_zip:
+              aws_cli_zip.extractall(destination)
+              for member in aws_cli_zip.infolist():
+                  if mode := member.external_attr >> 16:
+                      os.chmod(Path(destination, member.filename), mode)
+          PY
+          "$aws_cli_temp/aws/install" \
+            --install-dir "$aws_cli_install" \
+            --bin-dir "$aws_cli_bin"
+          printf '%s\n' "$aws_cli_bin" >> "$GITHUB_PATH"
+          "$aws_cli_bin/aws" --version
+
+      - name: Install OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # setup-opentofu/v2.0.2
+        with:
+          tofu_version: "1.12.6"
+          tofu_wrapper: false
+          cache: true
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: ${{ vars.AWS_DEFAULT_REGION || 'us-east-1' }}
+          role-to-assume: ${{ vars.AWS_ROLE_TFAPPLY }}
+          role-session-name: litellm-control-plane-apply-${{ inputs.environment }}
+
+      - name: Load LiteLLM API key
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # aws-secretsmanager-get-secrets@v3.0.2
+        with:
+          secret-ids: |
+            LITELLM_API_KEY,${{ vars.LITELLM_API_KEY_SECRET_ID }}
+          parse-json-secrets: false
+
+      - name: Verify LiteLLM authentication
+        run: |
+          set -euo pipefail
+
+          if ! curl \
+            --fail \
+            --silent \
+            --output /dev/null \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --header "Authorization: Bearer $LITELLM_API_KEY" \
+            "${LITELLM_API_BASE%/}/key/info"; then
+            echo "::error::LiteLLM control-plane authentication failed."
+            exit 1
+          fi
+
+      - name: Initialize OpenTofu state
+        run: tofu init -input=false
+
+      - name: Validate control-plane configuration
+        run: tofu validate -no-color
+
+      - name: Create approved apply plan
+        id: plan
+        run: |
+          set -euo pipefail
+
+          set +e
+          tofu plan \
+            -detailed-exitcode \
+            -input=false \
+            -lock-timeout=5m \
+            -no-color \
+            -out="$TF_PLAN_FILE" \
+            | tee "$TF_PLAN_TEXT"
+          plan_exit=${PIPESTATUS[0]}
+          set -e
+
+          case "$plan_exit" in
+            0)
+              echo "has_changes=false" >> "$GITHUB_OUTPUT"
+              ;;
+            2)
+              if ! tofu show -json "$TF_PLAN_FILE" | \
+                python3 scripts/check_tofu_plan.py; then
+                exit 1
+              fi
+              echo "has_changes=true" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::OpenTofu plan failed with exit code $plan_exit."
+              exit "$plan_exit"
+              ;;
+          esac
+
+      - name: Apply approved plan
+        if: steps.plan.outputs.has_changes == 'true'
+        run: tofu apply -input=false -lock-timeout=5m -no-color "$TF_PLAN_FILE"
+
+      - name: Record no-op result
+        if: steps.plan.outputs.has_changes == 'false'
+        run: echo "The $DEPLOYMENT_ENVIRONMENT LiteLLM control plane is already converged."
+
+      - name: Remove local plan files
+        if: always()
+        run: rm -f -- "$TF_PLAN_FILE" "$TF_PLAN_TEXT"

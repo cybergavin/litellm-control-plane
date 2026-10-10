@@ -1,0 +1,23 @@
+---
+# Production inference access belongs to team-bound service-account keys.
+# Human team members are dashboard observers only.
+# soft_budget defaults to 75% of max_budget; override when needed.
+# Alert email recipients default to <map-key>@<user_email_domain> for human
+# members; provide an explicit list via soft_budget_alerting_emails to override.
+teams:
+  engineering-platform:
+    team_alias: "Platform Engineering"
+    organization: "engineering"
+    models:
+      - "all-proxy-models"
+    max_budget: 200
+    budget_duration: "1mo"
+
+  data-science-research:
+    team_alias: "Research"
+    organization: "data-science"
+    models:
+      - "openai/gpt-4o"
+      - "openai/text-embedding-3-small"
+    max_budget: 100
+    budget_duration: "1mo"

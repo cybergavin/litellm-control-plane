@@ -1,0 +1,27 @@
+---
+# .pre-commit-config.yaml
+
+repos:
+  # Local hooks
+  - repo: local
+    hooks:
+      # Lint YAML files
+      - id: lint
+        name: Lint YAML files
+        entry: scripts/pc_lint.sh
+        language: script
+        files: \.(ya?ml)$
+
+      # Validate environment YAML files against their JSON schemas
+      - id: validate
+        name: Validate environment YAML files
+        entry: scripts/pc_validate.sh
+        language: script
+        files: ^environments/[^/]+/[^/]+\.ya?ml$
+
+      # Scan all staged JSON, TF and YAML files
+      - id: scan
+        name: Scan all staged JSON, TF and YAML files
+        entry: scripts/pc_scan.sh
+        language: script
+        files: \.(ya?ml|json|tf|tofu)$

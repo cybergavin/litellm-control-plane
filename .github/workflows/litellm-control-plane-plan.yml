@@ -1,0 +1,169 @@
+---
+name: LiteLLM Control Plane - Plan
+
+# checkov:skip=CKV_GHA_7: the only manual input is a validated environment choice; planning is read-only.
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "LiteLLM environment to plan (e.g. staging, prod)"
+        required: true
+        type: string
+      deployment_ref:
+        description: "Full immutable commit SHA to plan"
+        required: true
+        type: string
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "LiteLLM environment to plan"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: litellm-control-plane-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: Plan ${{ inputs.environment }} LiteLLM control plane
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    defaults:
+      run:
+        shell: bash
+        working-directory: "."
+    env:
+      DEPLOYMENT_REF: ${{ inputs.deployment_ref || github.sha }}
+      DEPLOYMENT_ENVIRONMENT: ${{ inputs.environment }}
+      LITELLM_API_BASE: ${{ vars.LITELLM_API_BASE }}
+      LITELLM_API_KEY_SECRET_ID: ${{ vars.LITELLM_API_KEY_SECRET_ID }}
+      TF_IN_AUTOMATION: "true"
+      TF_INPUT: "false"
+      TF_VAR_environment: ${{ inputs.environment }}
+      TF_PLAN_FILE: .litellm-control-plane-${{ inputs.environment }}.tfplan
+      TF_PLAN_TEXT: .litellm-control-plane-${{ inputs.environment }}-plan.txt
+    steps:
+      - name: Checkout
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # actions/checkout@v7.0.0
+        with:
+          ref: ${{ env.DEPLOYMENT_REF }}
+
+      - name: Verify immutable candidate
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$DEPLOYMENT_REF" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::deployment_ref must be a full lowercase 40-character commit SHA."
+            exit 1
+          fi
+          resolved_ref="$(git rev-parse HEAD)"
+          if [[ "$resolved_ref" != "$DEPLOYMENT_REF" ]]; then
+            echo "::error::Checkout resolved to $resolved_ref instead of $DEPLOYMENT_REF."
+            exit 1
+          fi
+
+      - name: Validate workflow configuration
+        env:
+          AWS_ROLE_TFPLAN: ${{ vars.AWS_ROLE_TFPLAN }}
+        run: |
+          set -euo pipefail
+
+          for required_name in \
+            AWS_ROLE_TFPLAN \
+            LITELLM_API_BASE \
+            LITELLM_API_KEY_SECRET_ID; do
+            if [[ -z "${!required_name:-}" ]]; then
+              echo "::error::Required GitHub variable ${required_name} is not configured."
+              exit 1
+            fi
+          done
+
+          command -v curl > /dev/null 2>&1 || {
+            echo "::error::The runner must provide curl."
+            exit 1
+          }
+
+      - name: Install OpenTofu
+        uses: opentofu/setup-opentofu@a1320f892987e89d278cc92dc5adc984fb93aca4 # setup-opentofu/v2.0.2
+        with:
+          tofu_version: "1.12.6"
+          tofu_wrapper: false
+          cache: true
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # aws-actions/configure-aws-credentials@v6.3.0
+        with:
+          aws-region: ${{ vars.AWS_DEFAULT_REGION || 'us-east-1' }}
+          role-to-assume: ${{ vars.AWS_ROLE_TFPLAN }}
+          role-session-name: litellm-control-plane-plan-${{ inputs.environment }}
+
+      - name: Load LiteLLM API key
+        uses: aws-actions/aws-secretsmanager-get-secrets@2297f9a879480a9e3af9b293ed15c70caf8e1c88 # aws-secretsmanager-get-secrets@v3.0.2
+        with:
+          secret-ids: |
+            LITELLM_API_KEY,${{ vars.LITELLM_API_KEY_SECRET_ID }}
+          parse-json-secrets: false
+
+      - name: Verify LiteLLM authentication
+        run: |
+          set -euo pipefail
+
+          if ! curl \
+            --fail \
+            --silent \
+            --output /dev/null \
+            --connect-timeout 10 \
+            --max-time 30 \
+            --header "Authorization: Bearer $LITELLM_API_KEY" \
+            "${LITELLM_API_BASE%/}/key/info"; then
+            echo "::error::LiteLLM control-plane authentication failed."
+            exit 1
+          fi
+
+      - name: Initialize OpenTofu state
+        run: tofu init -input=false
+
+      - name: Validate control-plane configuration
+        run: tofu validate -no-color
+
+      - name: Plan ${{ inputs.environment }} control-plane changes
+        run: |
+          set -euo pipefail
+
+          set +e
+          tofu plan \
+            -detailed-exitcode \
+            -input=false \
+            -lock-timeout=5m \
+            -no-color \
+            -out="$TF_PLAN_FILE" \
+            | tee "$TF_PLAN_TEXT"
+          plan_exit=${PIPESTATUS[0]}
+          set -e
+
+          case "$plan_exit" in
+            0|2)
+              tofu show -json "$TF_PLAN_FILE" | \
+                python3 scripts/check_tofu_plan.py
+              ;;
+            *)
+              echo "::error::OpenTofu plan failed with exit code $plan_exit."
+              exit "$plan_exit"
+              ;;
+          esac
+
+      - name: Record planned commit
+        run: |
+          printf 'Planned immutable candidate: `%s`\n' "$DEPLOYMENT_REF" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Remove local plan files
+        if: always()
+        run: rm -f -- "$TF_PLAN_FILE" "$TF_PLAN_TEXT"

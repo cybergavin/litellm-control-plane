@@ -1,0 +1,185 @@
+---
+name: Human Users - Manage LiteLLM Access
+run-name: >-
+  ${{ inputs.operation }} ${{ inputs.username }} in ${{ inputs.environment }} by @${{ github.actor }}
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "LiteLLM environment"
+        required: true
+        type: choice
+        options:
+          - staging
+          - prod
+      operation:
+        description: "User lifecycle operation"
+        required: true
+        type: choice
+        options:
+          - create
+          - update
+          - delete
+      username:
+        description: "Human user's username"
+        required: true
+        type: string
+      email:
+        description: "Optional email override; defaults on create and preserves on update"
+        required: false
+        type: string
+      current_email:
+        description: "Legacy users only: current email used for exact lookup on update or delete"
+        required: false
+        type: string
+      display_alias:
+        description: "Display name (first and last name)"
+        required: true
+        type: string
+      models:
+        description: >-
+          STAGING only: comma-separated creators or exact models; blank defaults on create and preserves on update
+        required: false
+        type: string
+      teams:
+        description: "PROD only: comma-separated exact LiteLLM team aliases; required on create"
+        required: false
+        type: string
+      change_reference:
+        description: "Change, request, or incident reference"
+        required: true
+        type: string
+      confirm_delete:
+        description: "Required confirmation for delete"
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: litellm-human-user-${{ inputs.environment }}-${{ inputs.username }}
+  cancel-in-progress: false
+
+jobs:
+  manage-user:
+    name: ${{ inputs.operation }} ${{ inputs.username }} in ${{ inputs.environment }}
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 5
+    env:
+      LITELLM_API_BASE: ${{ vars.LITELLM_API_BASE }}
+      LITELLM_API_KEY_SECRET_ID: ${{ vars.LITELLM_API_KEY_SECRET_ID }}
+    steps:
+      - name: Checkout workflow implementation
+        uses: actions/checkout@v4
+
+      - name: Validate execution context
+        env:
+          AWS_ROLE_TFAPPLY: ${{ vars.AWS_ROLE_TFAPPLY }}
+        run: |
+          set -euo pipefail
+
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo "::error::Human-user management must be dispatched from main."
+            exit 1
+          fi
+          for required_name in \
+            AWS_ROLE_TFAPPLY \
+            LITELLM_API_BASE \
+            LITELLM_API_KEY_SECRET_ID; do
+            if [[ -z "${!required_name:-}" ]]; then
+              echo "::error::Required GitHub variable ${required_name} is not configured."
+              exit 1
+            fi
+          done
+          command -v python3 >/dev/null 2>&1 || {
+            echo "::error::The runner must provide python3."
+            exit 1
+          }
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ vars.AWS_DEFAULT_REGION || 'us-west-2' }}
+          role-to-assume: ${{ vars.AWS_ROLE_TFAPPLY }}
+          role-session-name: litellm-human-user-${{ inputs.environment }}
+
+      - name: Load LiteLLM API key
+        uses: aws-actions/aws-secretsmanager-get-secrets@v2
+        with:
+          secret-ids: |
+            LITELLM_API_KEY,${{ vars.LITELLM_API_KEY_SECRET_ID }}
+          parse-json-secrets: false
+
+      - name: Validate, execute, verify, and audit
+        env:
+          INPUT_CHANGE_REFERENCE: ${{ inputs.change_reference }}
+          INPUT_CONFIRM_DELETE: ${{ inputs.confirm_delete }}
+          INPUT_CURRENT_EMAIL: ${{ inputs.current_email }}
+          INPUT_DISPLAY_ALIAS: ${{ inputs.display_alias }}
+          INPUT_EMAIL: ${{ inputs.email }}
+          INPUT_ENVIRONMENT: ${{ inputs.environment }}
+          INPUT_MODELS: ${{ inputs.models }}
+          INPUT_USERNAME: ${{ inputs.username }}
+          INPUT_OPERATION: ${{ inputs.operation }}
+          INPUT_TEAMS: ${{ inputs.teams }}
+        run: |
+          set -euo pipefail
+
+          args=(
+            --operation "$INPUT_OPERATION"
+            --environment "$INPUT_ENVIRONMENT"
+            --username "$INPUT_USERNAME"
+            --email "$INPUT_EMAIL"
+            --current-email "$INPUT_CURRENT_EMAIL"
+            --display-alias "$INPUT_DISPLAY_ALIAS"
+            --models "$INPUT_MODELS"
+            --teams "$INPUT_TEAMS"
+            --change-reference "$INPUT_CHANGE_REFERENCE"
+            --actor "github:${GITHUB_ACTOR}"
+            --request-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          )
+          if [[ "$INPUT_CONFIRM_DELETE" == "true" ]]; then
+            args+=(--confirm-delete)
+          fi
+          python3 scripts/manage_litellm_user.py "${args[@]}"
+
+  notify-staging-create:
+    name: Send STAGING welcome email
+    needs: manage-user
+    if: >-
+      ${{
+        needs.manage-user.result == 'success' &&
+        inputs.environment == 'staging' &&
+        inputs.operation == 'create'
+      }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - name: Checkout notification implementation
+        uses: actions/checkout@v4
+
+      - name: Send welcome email
+        env:
+          INPUT_CHANGE_REFERENCE: ${{ inputs.change_reference }}
+          INPUT_DISPLAY_ALIAS: ${{ inputs.display_alias }}
+          INPUT_EMAIL: ${{ inputs.email }}
+          INPUT_USERNAME: ${{ inputs.username }}
+          WELCOME_CC_ADDRESSES: ${{ vars.LITELLM_STAGING_WELCOME_CC_ADDRESSES }}
+        run: |
+          set -euo pipefail
+
+          python3 scripts/send_litellm_staging_welcome_email.py \
+            --username "$INPUT_USERNAME" \
+            --email "$INPUT_EMAIL" \
+            --display-name "$INPUT_DISPLAY_ALIAS" \
+            --cc-addresses "$WELCOME_CC_ADDRESSES" \
+            --change-reference "$INPUT_CHANGE_REFERENCE" \
+            --actor "github:${GITHUB_ACTOR}" \
+            --request-id "${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"

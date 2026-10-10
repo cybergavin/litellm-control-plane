@@ -1,0 +1,51 @@
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+required:
+  - organizations
+properties:
+  organizations:
+    type: object
+    description: LiteLLM organizations keyed by a stable configuration identifier.
+    propertyNames:
+      pattern: "^[a-z0-9][a-z0-9_-]*$"
+    additionalProperties:
+      type: object
+      required:
+        - organization_alias
+      properties:
+        organization_alias:
+          type: string
+          minLength: 1
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        models:
+          type: array
+          description: >-
+            Optional broad parent allowance of LiteLLM model names or built-in
+            access aliases, not models.yaml map keys. Defaults to
+            all-proxy-models; production teams remain the authoritative model
+            restriction.
+          minItems: 1
+          uniqueItems: true
+          items:
+            type: string
+            minLength: 1
+        max_budget:
+          type: number
+          minimum: 0
+        budget_duration:
+          type: string
+          minLength: 1
+        tpm_limit:
+          type: integer
+          minimum: 0
+        rpm_limit:
+          type: integer
+          minimum: 0
+        blocked:
+          type: boolean
+      additionalProperties: false
+additionalProperties: false

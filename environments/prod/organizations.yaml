@@ -1,0 +1,10 @@
+---
+# Organizations default to all-proxy-models as the broad parent allowance
+# required for child team assignments. teams.yaml owns the authoritative
+# production model restrictions; only override an organization when every
+# child team's model list remains within that explicit allowance.
+organizations:
+  engineering:
+    organization_alias: "Engineering"
+  data-science:
+    organization_alias: "Data Science"

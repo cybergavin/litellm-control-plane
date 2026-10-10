@@ -1,0 +1,33 @@
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+required:
+  - team_members
+properties:
+  team_members:
+    type: object
+    description: >-
+      Service-account workload identities grouped by stable team key. OpenTofu
+      assigns each the non-administrative user role so that their team-bound
+      key can perform inference.
+
+      Human users are NOT declared here. They are provisioned automatically
+      by your Identity Provider through SSO JIT provisioning or SCIM sync.
+      See docs/USER_PROVISIONING.md.
+    propertyNames:
+      pattern: "^[a-z0-9][a-z0-9-]*$"
+    additionalProperties:
+      type: array
+      minItems: 1
+      uniqueItems: true
+      items:
+        type: object
+        required:
+          - principal
+        properties:
+          principal:
+            type: string
+            description: Stable key from service_accounts.yaml (must match svc-* pattern).
+            pattern: "^svc-[a-z0-9][a-z0-9-]*$"
+        additionalProperties: false
+additionalProperties: false

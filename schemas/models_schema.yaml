@@ -1,0 +1,71 @@
+---
+$schema: "https://json-schema.org/draft/2020-12/schema"
+type: object
+required:
+  - models
+properties:
+  models:
+    type: object
+    description: LiteLLM models keyed by a stable configuration identifier.
+    propertyNames:
+      pattern: "^[a-z0-9][a-z0-9-]*$"
+    additionalProperties:
+      type: object
+      required:
+        - model_name
+        - custom_llm_provider
+        - base_model
+      properties:
+        model_name:
+          type: string
+          minLength: 1
+        custom_llm_provider:
+          type: string
+          pattern: "^[a-z0-9][a-z0-9_-]*$"
+        base_model:
+          type: string
+          minLength: 1
+        credential_name:
+          type: string
+          description: Optional non-secret credential alias declared in the LiteLLM config.
+          pattern: "^[a-z0-9][a-z0-9_-]*$"
+        api_base:
+          type: string
+          description: Non-secret upstream endpoint required by this deployment.
+          format: uri
+        additional_litellm_params:
+          type: object
+          description: Non-secret provider-specific parameters stored in OpenTofu state.
+          additionalProperties:
+            type: string
+        mode:
+          type: string
+          enum:
+            - completion
+            - embedding
+            - image_generation
+            - chat
+            - moderation
+            - audio_transcription
+            - audio_speech
+            - rerank
+        preserve_api_configuration:
+          type: boolean
+          const: true
+          description: Preserve imported API configuration that the pinned provider cannot represent.
+        tier:
+          type: string
+          enum:
+            - free
+            - paid
+        rpm:
+          type: integer
+          minimum: 1
+        input_cost_per_million_tokens:
+          type: number
+          minimum: 0
+        output_cost_per_million_tokens:
+          type: number
+          minimum: 0
+      additionalProperties: false
+additionalProperties: false
