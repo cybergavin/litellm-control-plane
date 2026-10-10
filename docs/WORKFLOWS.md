@@ -347,4 +347,4 @@ sequenceDiagram
 | **Least-privilege IAM** | Plan uses `AWS_ROLE_TFPLAN` (read-only); Apply uses `AWS_ROLE_TFAPPLY` (write) |
 | **Credentials never in code** | API key fetched from Secrets Manager at runtime; never stored in YAML, HCL, or workflow files |
 | **Concurrency lock** | All three workflows share a concurrency group per environment; concurrent runs queue, never cancel |
-| **Production viewer-only users** | `users.tf` lifecycle precondition rejects any human user with a non-viewer role in the production environment |
+| **Production viewer-only users** | `manage_litellm_user.py` policy assertion verifies that all production human users have viewer-only roles and zero keys |

@@ -41,7 +41,6 @@ The control plane is natively environment-aware, typically starting with two:
 ├── models.tf                   # litellm_model resources + UI model import scaffold
 ├── organizations.tf            # litellm_organization resources
 ├── teams.tf                    # litellm_team resources (budget & spend enforcement)
-├── users.tf                    # Explains human user provisioning architecture (no IaC resources)
 ├── service_accounts.tf         # litellm_user + litellm_key for workload identities
 ├── team_members.tf             # litellm_team_member_add for service accounts only
 ├── outputs.tf                  # Useful outputs (team IDs, org IDs, key aliases)
@@ -52,16 +51,14 @@ The control plane is natively environment-aware, typically starting with two:
 │   ├── staging/                # Non-production environment
 │   │   ├── global.yaml         # Environment settings (prod_environment, user_email_domain)
 │   │   ├── models.yaml         # Models available in staging
-│   │   ├── organizations.yaml  # Staging organization boundary
-│   │   └── users.yaml          # Informational placeholder (users managed outside IaC)
+│   │   └── organizations.yaml  # Staging organization boundary
 │   └── prod/                   # Production environment
 │       ├── global.yaml
 │       ├── models.yaml
 │       ├── organizations.yaml
 │       ├── teams.yaml
 │       ├── team_members.yaml   # Service accounts only
-│       ├── service_accounts.yaml
-│       └── users.yaml          # Informational placeholder (users managed outside IaC)
+│       └── service_accounts.yaml
 ├── schemas/                    # JSON Schema validators for all YAML files
 ├── scripts/
 │   ├── check_tofu_plan.py      # Rejects replacement/mixed destroy actions in CI
@@ -138,7 +135,7 @@ prod_environment: "my-env"
 user_email_domain: "example.com"
 ```
 
-> **Human users** are not managed in IaC files. See [Human User Management](#human-user-management) and [docs/USER_PROVISIONING.md](docs/USER_PROVISIONING.md) for how users are provisioned via IdP or the automated GitHub Actions workflow.
+> **Human users** are not managed in IaC or environment YAML files (no `users.tf` or `users.yaml`). See [Human User Management](#human-user-management) and [docs/USER_PROVISIONING.md](docs/USER_PROVISIONING.md) for how users are provisioned via IdP or the automated GitHub Actions workflow.
 
 ### 3. Set required environment variables
 
@@ -243,17 +240,13 @@ team_members:
     - principal: "svc-my-app"   # Must match a key in service_accounts.yaml
 ```
 
-### `users.yaml`
-
-This file is an **informational placeholder**. Human users are **not managed in YAML or OpenTofu state**. Any entries in this file are ignored by OpenTofu. See [Human User Management](#human-user-management) below for details.
-
 ---
 
 ## Human User Management
 
 ### Provisioning Philosophy
 
-Managing individual human users in declarative IaC creates operational friction: it exposes PII (usernames, email addresses) in git history, causes state churn, and risks locking Terraform state during routine onboarding or offboarding.
+Human users are **completely decoupled from the declarative IaC control plane** — there are no `users.tf`, `users.yaml`, or user schemas. Managing individual human users in declarative IaC creates operational friction: it exposes PII (usernames, email addresses) in git history, causes state churn, and risks locking Terraform state during routine onboarding or offboarding.
 
 Our user management philosophy operates across three tiers:
 
