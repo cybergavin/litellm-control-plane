@@ -77,6 +77,8 @@ The control plane is natively environment-aware, typically starting with two:
     └── litellm-human-user.yml              # Human user access management & onboarding
 ```
 
+---
+
 ## Quick Start
 
 ### Prerequisites
@@ -156,6 +158,7 @@ tofu validate
 tofu plan -out=plan.tfplan
 tofu apply plan.tfplan
 ```
+---
 
 ## Environment Configuration Reference
 
@@ -165,7 +168,8 @@ tofu apply plan.tfplan
 |---|---|---|---|
 | `prod_environment` | No | `"prod"` | Environment name that activates production governance (team budgets, tags, strict key permissions) |
 | `user_email_domain` | No | _(none)_ | Domain used to derive alert email addresses for soft-budget notifications |
-| `preserved_model_imports` | No | `{}` | Ephemeral import map for UI-created models (see [Importing UI Models](#importing-ui-models)) |
+| `model_imports` | No | `{}` | Ephemeral map of model key → LiteLLM model ID for adopting existing models (see [Adopting Existing Models](#adopting-existing-models)) |
+| `preserved_model_imports` | No | `{}` | Deprecated alias for `model_imports`, kept for backward compatibility |
 
 ### `models.yaml`
 
@@ -348,28 +352,65 @@ python3 scripts/manage_litellm_user.py --request-file request.json
 
 ---
 
-## Importing UI Models
+## Adopting Existing Models
 
-If a model was created via the LiteLLM UI and its API configuration cannot be fully represented by the pinned provider version, use the `preserve_api_configuration` flag:
+Models that already exist in LiteLLM must be **imported into OpenTofu state** before the control plane manages them. This applies when:
 
-```yaml
-# models.yaml
-models:
-  my-special-model:
-    model_name: "my/special-model"
-    custom_llm_provider: "openai"
-    base_model: "special-model"
-    preserve_api_configuration: true
-```
+- rolling this out in a **brownfield** environment with models already configured, or
+- a model was created through the **LiteLLM UI or API** and you now want it under Git control.
 
-Then add a temporary import entry to `global.yaml`:
+The `model_imports` map in an environment's `global.yaml` queues models for import. It is **ephemeral**: add entries, apply once, then remove them.
 
-```yaml
-preserved_model_imports:
-  my-special-model: "<litellm-model-uuid>"
-```
+### Choosing how to manage the model
 
-Run `tofu plan` and `tofu apply` once to import the state, then remove the entry from `preserved_model_imports`.
+| Situation | `models.yaml` setting | OpenTofu behavior |
+|---|---|---|
+| The pinned provider can fully represent the model | _(default)_ | Fully managed: YAML is the source of truth and drift is corrected |
+| The provider lags behind the UI/API and cannot represent the model's configuration | `preserve_api_configuration: true` | OpenTofu owns the model's existence only; LiteLLM (UI/API) owns its attributes |
+
+### Procedure
+
+1. **Find the model ID.** Copy it from the model's details in the LiteLLM UI, or call `GET /model/info` and read `model_info.id`.
+2. **Declare the model in `models.yaml`** under a stable key, adding `preserve_api_configuration: true` if the provider cannot represent it:
+
+   ```yaml
+   # environments/<env>/models.yaml
+   models:
+     my-special-model:
+       model_name: "my/special-model"
+       custom_llm_provider: "openai"
+       base_model: "special-model"
+       preserve_api_configuration: true   # omit for fully managed models
+   ```
+
+3. **Queue the import** in the _same environment's_ `global.yaml`, using the same key:
+
+   ```yaml
+   # environments/<env>/global.yaml
+   model_imports:
+     my-special-model: "<litellm-model-id>"
+   ```
+
+4. **Plan and verify.** Run `tofu plan` and confirm it shows the model as `will be imported` with no create or destroy. Merge both changes in a single PR.
+5. **Apply** to adopt the model into state.
+6. **Clean up.** Remove the entry from `model_imports` in a follow-up commit and keep the empty map. The `models.yaml` entry stays.
+
+Models flagged `preserve_api_configuration` are imported into `litellm_model.preserved`; all others into `litellm_model.this`.
+
+> [!WARNING]
+> **Import before you apply.** LiteLLM allows several models with the same `model_name`. If a model that already exists in LiteLLM is added to `models.yaml` without being imported first, `tofu apply` creates a **second** model rather than adopting the existing one. An import key that is not defined in `models.yaml` fails the plan to prevent this.
+
+### Behavior of preserved models
+
+- `lifecycle { ignore_changes = all }` applies: editing a preserved model's `rpm`, costs or other fields in YAML has **no effect**. Treat those values as a record, not as enforced configuration.
+- Removing a preserved model from `models.yaml` **destroys it in LiteLLM**, just like any other model. The plan's destructive-change check applies.
+- Because the UI/API owns its attributes, changes made there are not reported as drift.
+
+### Requirements
+
+- Import blocks with `for_each` require OpenTofu 1.7 or later (this repository pins 1.12.x).
+- Imports are per environment: queue entries only in the `global.yaml` of the environment where the model exists.
+- The legacy `preserved_model_imports` key still works and is merged into `model_imports`, but new entries should use `model_imports`.
 
 ---
 
