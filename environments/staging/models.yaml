@@ -22,3 +22,45 @@ models:
     custom_llm_provider: "bedrock"
     base_model: "us.amazon.nova-lite-v1:0"
     mode: "chat"
+
+  # ---------------------------------------------------------------------------
+  # EXAMPLE: adopting models that already exist in LiteLLM (commented out).
+  #
+  # Hypothetical scenario: before this repository was introduced, the team
+  # created two models by hand in the LiteLLM UI:
+  #
+  #   1. "Claude Sonnet"  -> fully representable by the pinned provider.
+  #   2. "Gemini Flash"   -> uses a new parameter the pinned provider cannot
+  #                          represent yet.
+  #
+  # To bring both under Git control without creating duplicates:
+  #
+  #   a) Declare each model below under a stable key.
+  #   b) Set preserve_api_configuration: true ONLY for the model the provider
+  #      cannot represent (here, Gemini Flash).
+  #   c) In the SAME PR, queue both under model_imports in this environment's
+  #      global.yaml, using the same keys and each model's LiteLLM ID.
+  #   d) Run `tofu plan`: both models must show "will be imported" and nothing
+  #      may be created or destroyed. Then apply.
+  #   e) Remove the model_imports entries afterwards; keep the models below.
+  #
+  # IMPORTANT: if a model that already exists in LiteLLM is declared here
+  # WITHOUT being imported first, apply creates a second copy of it.
+  #
+  # Managed model: YAML is the source of truth and drift is corrected.
+  # anthropic-claude-sonnet:
+  #   model_name: "anthropic/claude-sonnet"
+  #   custom_llm_provider: "anthropic"
+  #   base_model: "claude-sonnet"
+  #   credential_name: "anthropic_credential"
+  #   mode: "chat"
+  #
+  # Preserved model: OpenTofu tracks its existence (and deletes it if this
+  # entry is removed), but LiteLLM owns its attributes. Edits to rpm, costs,
+  # etc. here are NOT enforced (ignore_changes = all), so treat them as a record.
+  # google-gemini-flash:
+  #   model_name: "google/gemini-flash"
+  #   custom_llm_provider: "gemini"
+  #   base_model: "gemini-flash"
+  #   credential_name: "google_credential"
+  #   preserve_api_configuration: true

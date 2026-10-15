@@ -16,9 +16,25 @@ properties:
       soft-budget alert recipients (e.g. "example.com"). Omit to disable
       automatic email derivation.
     pattern: "^[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$"
-  preserved_model_imports:
+  model_imports:
     type: object
     description: >-
+      Ephemeral import map for adopting models that already exist in LiteLLM
+      (brownfield rollouts, or models created through the UI or API). Keys must
+      match entries in models.yaml; values are LiteLLM model IDs. Models with
+      preserve_api_configuration: true are imported as preserved models, all
+      others as managed models. Run an import-only plan, apply it, then remove
+      the entry.
+    propertyNames:
+      pattern: "^[a-z0-9][a-z0-9-]*$"
+    additionalProperties:
+      type: string
+      minLength: 1
+  preserved_model_imports:
+    type: object
+    deprecated: true
+    description: >-
+      Deprecated alias for model_imports, retained for backward compatibility.
       Ephemeral import map for UI-created models whose API configuration the
       pinned provider cannot represent. Add the stable model key and LiteLLM
       ID here, run an import-only plan, apply it, then remove the entry.
